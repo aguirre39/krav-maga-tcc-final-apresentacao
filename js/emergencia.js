@@ -25,7 +25,7 @@ let monitoringStartTime = 0; // Variável para controlar o tempo de aquecimento 
 // 15 m/s (~54 km/h) = Carro (Padrão Real)
 // 4.5 m/s (~16 km/h) = Corrida vigorosa / Drift de GPS indoor
 // AVISO: Se disparar sozinho, aumente para 6.0. Se não disparar correndo, diminua para 3.0.
-const ANOMALY_THRESHOLD_MPS = 6.0; 
+const ANOMALY_THRESHOLD_MPS = 6.5; 
 
 // Constantes para o ciclo de verificação de segurança
 const USER_CHECK_VISIBILITY_DURATION_MS = 15000; 
