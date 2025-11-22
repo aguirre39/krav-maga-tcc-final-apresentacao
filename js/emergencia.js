@@ -19,11 +19,13 @@ let modoAlertaAtivo = false;
 let lastFirebaseUpdateTimestamp = 0; 
 let contactsListener = null; 
 let lastLocation = null; 
+let monitoringStartTime = 0; // Variável para controlar o tempo de aquecimento do GPS
 
-// --- CONFIGURAÇÃO DE DETECÇÃO DE ANOMALIA (PARA DEMONSTRAÇÃO EM SALA) ---
-// 15 m/s (~54 km/h) é o padrão real para carros.
-// 0.8 m/s (~2.8 km/h) detecta caminhada leve (ideal para testar em sala de aula).
-const ANOMALY_THRESHOLD_MPS = 3.5; 
+// --- CONFIGURAÇÃO DE DETECÇÃO DE ANOMALIA (AJUSTADO PARA SALA DE AULA) ---
+// 15 m/s (~54 km/h) = Carro (Padrão Real)
+// 4.5 m/s (~16 km/h) = Corrida vigorosa / Drift de GPS indoor
+// AVISO: Se disparar sozinho, aumente para 6.0. Se não disparar correndo, diminua para 3.0.
+const ANOMALY_THRESHOLD_MPS = 4.5; 
 
 // Constantes para o ciclo de verificação de segurança
 const USER_CHECK_VISIBILITY_DURATION_MS = 15000; 
@@ -141,8 +143,8 @@ export function setupEmergencia(dependencies) {
             speed: 100 // m/s simulados
         };
         
-        // Força a detecção
-        detectAnomalies(fakeLocation);
+        // Força a detecção (ignora o warm-up na simulação manual)
+        detectAnomalies(fakeLocation, true);
         
         // Atualiza no Firebase para o Tracker ver
         await update(ref(db, `emergencySessions/${currentEmergencySessionId}`), {
@@ -196,6 +198,7 @@ export async function resumeActiveSession(userId) {
                 currentEmergencySessionId = sessionId;
                 modoAlertaAtivo = (sessionToResume.status === 'panic_triggered_by_user'); 
                 lastLocation = sessionToResume.liveLocation || sessionToResume.initialLocation;
+                monitoringStartTime = Date.now(); // Reinicia o warm-up ao resumir
 
                 ui.emergencyButton.innerHTML = '<i class="fas fa-times-circle me-2"></i>ENCERRAR ACOMPANHAMENTO';
                 ui.emergencyButton.classList.remove('btn-danger', 'emergency-button-pulse-animation');
@@ -247,8 +250,16 @@ function toggleEmergencyAlert() {
 // ===================================================================================
 
 // --- DETECÇÃO DE MOVIMENTO ANÔMALO ---
-function detectAnomalies(newLocation) {
+function detectAnomalies(newLocation, forceTest = false) {
     if (!lastLocation) { lastLocation = newLocation; return; }
+
+    // PROTEÇÃO DE ESTABILIZAÇÃO (WARM-UP):
+    // Ignora anomalias nos primeiros 10 segundos para evitar o "pulo" inicial do GPS.
+    if (!forceTest && (Date.now() - monitoringStartTime < 10000)) {
+        console.log("Estabilizando GPS... Anomalias ignoradas.");
+        lastLocation = newLocation;
+        return;
+    }
 
     if (lastLocation.timestamp) {
         const R = 6371e3; 
@@ -263,7 +274,7 @@ function detectAnomalies(newLocation) {
         if (timeDiff > 0) { 
             const speed = d / timeDiff; // m/s
 
-            // Utiliza a constante calibrada para sala de aula (0.8 m/s)
+            // Utiliza a constante calibrada (4.5 m/s)
             if (speed > ANOMALY_THRESHOLD_MPS) { 
                 console.warn(`⚠️ Movimento anômalo detectado: ${speed.toFixed(2)} m/s (Limite: ${ANOMALY_THRESHOLD_MPS} m/s)`);
                 update(ref(db, `emergencySessions/${currentEmergencySessionId}`), {
@@ -372,6 +383,7 @@ async function handleActivateEmergencyAlert() {
         const locationData = { latitude, longitude, accuracy, timestamp: new Date().toISOString() };
 
         lastLocation = locationData; 
+        monitoringStartTime = Date.now(); // Inicia contagem de estabilização
 
         const newSessionRef = push(ref(db, 'emergencySessions'));
         currentEmergencySessionId = newSessionRef.key;
@@ -637,7 +649,7 @@ async function handleShare() {
         if (ui.trackingLinkInput) ui.trackingLinkInput.value = link;
     } else if (!link) {
          showMessage("Inicie o acompanhamento para gerar um link para compartilhar.", true);
-         return; // Não há o que compartilhar
+         return;
     }
 
     const shareData = {
