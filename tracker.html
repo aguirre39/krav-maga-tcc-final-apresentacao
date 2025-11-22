@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KMW - Acompanhamento de Emergência</title>
+    
+    <!-- Leaflet CSS: Biblioteca para mapas interativos -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Estilos CSS Integrados para garantir funcionamento autônomo -->
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; overflow: hidden; background: #f4f4f4; }
+        
+        /* Container do Mapa */
+        #map-container { position: relative; height: 100vh; width: 100%; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        
+        /* Banner de Status Superior */
+        #status-banner {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+            transition: background-color 0.3s, box-shadow 0.3s;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        /* Variações de Status */
+        #status-banner.panic { background-color: #dc3545; animation: pulse-red 1.5s infinite; }
+        #status-banner.lost { background-color: #ffc107; color: #333; }
+        #status-banner.anomaly { background-color: #fd7e14; color: #fff; }
+        
+        /* Botão Centralizar Mapa */
+        #recenter-map-btn {
+            position: absolute;
+            bottom: 30px; right: 20px;
+            z-index: 1000;
+            background: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px; height: 50px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            color: #333;
+            transition: transform 0.2s;
+        }
+        #recenter-map-btn:active { transform: scale(0.95); }
+        
+        /* Timestamp da Última Atualização */
+        #last-update-timestamp {
+            position: absolute;
+            bottom: 35px; left: 20px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.9);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: #555;
+            font-weight: 600;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: none; /* Oculto até ter dados */
+        }
+        #last-update-timestamp.visible { display: block; }
+
+        /* Estilos dos Modais */
+        .modal-overlay {
+            display: none; /* Flex quando ativo */
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 2000;
+            justify-content: center; align-items: center;
+            padding: 20px;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .modal-content-custom {
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .modal-content-custom h2 { margin-top: 0; font-size: 1.5rem; margin-bottom: 15px; }
+        
+        /* Botões dos Modais */
+        .modal-buttons, .modal-emergency-buttons {
+            display: flex; gap: 10px; margin-top: 20px; justify-content: center;
+        }
+        .modal-emergency-buttons { flex-direction: column; }
+        
+        .modal-buttons button, .modal-emergency-buttons a, .modal-emergency-buttons button {
+            padding: 14px; border-radius: 8px; text-decoration: none; 
+            font-weight: bold; border: none; cursor: pointer; font-size: 1rem;
+            transition: opacity 0.2s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-buttons button:active, .modal-emergency-buttons a:active { opacity: 0.8; }
+        
+        /* Cores Específicas de Ação */
+        #security-check-no { background-color: #dc3545; color: white; flex: 1; }
+        #security-check-yes { background-color: #28a745; color: white; flex: 1; }
+        
+        .emergency-option-critical { background: #dc3545; color: white; }
+        .emergency-option-secondary { background: #25D366; color: white; }
+        .emergency-option-close { background: #e0e0e0; color: #333; }
+
+        /* Ícone do Marcador no Mapa (Pulsante) */
+        .pulsing-dot-icon {
+            width: 18px; height: 18px;
+            background: #e83e8c;
+            border-radius: 50%;
+            box-shadow: 0 0 0 rgba(232, 62, 140, 0.4);
+            animation: pulse 1.5s infinite;
+            border: 2px solid white;
+        }
+
+        /* Notificação flutuante de "Usuária OK" */
+        #user-ok-notification {
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        /* Animações Keyframes */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(232, 62, 140, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(232, 62, 140, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(232, 62, 140, 0); }
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(220, 53, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="tracker-page">
+
+    <div id="map-container">
+        <div id="status-banner">Conectando à sessão de emergência...</div>
+        <div id="map"></div>
+        <button id="recenter-map-btn" aria-label="Centralizar no Usuário">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
+        </button>
+        <div id="last-update-timestamp"></div>
+    </div>
+
+    <!-- Modal de Verificação de Segurança (Para o Observador confirmar status) -->
+    <div id="security-check-modal" class="modal-overlay">
+        <div class="modal-content-custom">
+            <h2>Verificação de Segurança</h2>
+            <p>O sistema solicitou verificação. A pessoa que você está acompanhando está bem?</p>
+            <div class="modal-buttons">
+                <button id="security-check-no">🚨 NÃO</button>
+                <button id="security-check-yes">✅ SIM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Opções de Emergência (Acionado pelo Pânico) -->
+    <div id="emergency-options-modal" class="modal-overlay">
+        <div class="modal-content-custom">
+            <h2 style="color: #dc3545;">⚠️ ALERTA DE PÂNICO!</h2>
+            <p>A usuária sinalizou perigo ou o sistema detectou uma anomalia crítica.</p>
+            <div class="modal-emergency-buttons">
+                <a href="tel:190" class="emergency-option-critical">🔴 Ligar para a Polícia (190)</a>
+                <a href="https://api.whatsapp.com/send?text=ALERTA%20DE%20EMERG%C3%8ANCIA:%20Preciso%20de%20ajuda.%20Acompanhe%20a%20localiza%C3%A7%C3%A3o%20em%20tempo%20real%20aqui:%20" id="whatsapp-share-link" target="_blank" class="emergency-option-secondary">🟠 Avisar Contatos (WhatsApp)</a>
+                <button id="close-emergency-modal" class="emergency-option-close">🔘 Manter Acompanhamento</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        // Configuração do Firebase
+        const __firebase_config_str = `{
+            "apiKey": "AIzaSyBfVieHjJ9lq8sYnhn4J4AhWi4W7cx9cYk",
+            "authDomain": "krav-maga-woman.firebaseapp.com",
+            "databaseURL": "https://krav-maga-woman-default-rtdb.firebaseio.com/",
+            "projectId": "krav-maga-woman",
+            "storageBucket": "krav-maga-woman.appspot.com",
+            "messagingSenderId": "970804139681",
+            "appId": "1:970804139681:web:d27e7f113a85b9b6e82a3b"
+        }`;
+    </script>
+
+    <script type="module">
+        // MÓDULO DE ACOMPANHAMENTO EM TEMPO REAL (TRACKER)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getDatabase, ref, onValue, update, get, off } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+
+        // --- Elementos da UI ---
+        const statusBanner = document.getElementById('status-banner');
+        const mapDiv = document.getElementById('map');
+        const recenterMapBtn = document.getElementById('recenter-map-btn');
+        const lastUpdateTimestamp = document.getElementById('last-update-timestamp');
+        
+        const securityCheckModal = document.getElementById('security-check-modal');
+        const emergencyOptionsModal = document.getElementById('emergency-options-modal');
+        const securityCheckYesBtn = document.getElementById('security-check-yes');
+        const securityCheckNoBtn = document.getElementById('security-check-no');
+        const closeEmergencyModalBtn = document.getElementById('close-emergency-modal');
+        const whatsappShareLink = document.getElementById('whatsapp-share-link');
+
+        // --- Variáveis de Controle ---
+        let map = null;
+        let userMarker = null;
+        let pathPolyline = null;
+        let accuracyCircle = null;
+        let lastKnownLatLng = null;
+        let lastKnownUserSafetyConfirmation = null;
+        let checkRequestListener = null;
+        let panicAlertSound = null;
+        let sessionStatus = 'connecting';
+        
+        // Configuração do Watchdog (Segurança Ativa)
+        const STALE_CONNECTION_THRESHOLD_MS = 60000; // 60 segundos sem sinal = Conexão Perdida
+
+        // --- Funções Utilitárias ---
+
+        function formatTimestamp(isoString) {
+            if (!isoString) return '--:--:--';
+            const date = new Date(isoString);
+            return date.toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        
+        function showUserOkNotification(userName) {
+            let notification = document.getElementById('user-ok-notification');
+            if (!notification) {
+                notification = document.createElement('div');
+                notification.id = 'user-ok-notification';
+                notification.style.position = 'absolute';
+                notification.style.top = '80px';
+                notification.style.left = '50%';
+                notification.style.transform = 'translateX(-50%) translateY(-20px)';
+                notification.style.zIndex = '1001';
+                notification.style.backgroundColor = 'rgba(40, 167, 69, 0.95)';
+                notification.style.color = 'white';
+                notification.style.padding = '12px 24px';
+                notification.style.borderRadius = '30px';
+                notification.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+                notification.style.fontSize = '0.95rem';
+                notification.style.fontWeight = '600';
+                notification.style.textAlign = 'center';
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.5s ease-in-out, transform 0.5s ease-in-out';
+                notification.style.pointerEvents = 'none'; // Permite clicar no mapa através dele
+                document.getElementById('map-container').appendChild(notification);
+            }
+            
+            notification.textContent = `✅ ${userName} confirmou que está tudo bem (${formatTimestamp(new Date().toISOString())}).`;
+            
+            requestAnimationFrame(() => {
+                notification.style.opacity = '1';
+                notification.style.transform = 'translateX(-50%) translateY(0)';
+            });
+
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            }, 6000);
+        }
+
+        function updateStatus(text, type = 'info') {
+            if (!statusBanner) return;
+            statusBanner.textContent = text;
+            statusBanner.className = ''; // Reset classes
+            if (type) statusBanner.classList.add(type);
+        }
+
+        function initializeMap(latLng, accuracy) {
+            if (map) return;
+            map = L.map('map', { zoomControl: false }).setView(latLng, 17);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+                attribution: '&copy; OpenStreetMap contributors' 
+            }).addTo(map);
+            
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            
+            // Ícone personalizado com CSS Pulse
+            const pulsingIcon = L.divIcon({ className: 'pulsing-dot-icon', iconSize: [18, 18] });
+            
+            userMarker = L.marker(latLng, { icon: pulsingIcon }).addTo(map);
+            pathPolyline = L.polyline([], { color: '#e83e8c', weight: 5, opacity: 0.8, lineJoin: 'round' }).addTo(map);
+            accuracyCircle = L.circle(latLng, { radius: accuracy, weight: 1, color: '#e83e8c', fillColor: '#e83e8c', fillOpacity: 0.1 }).addTo(map);
+            lastKnownLatLng = latLng;
+        }
+
+        function updateMap(latLng, accuracy) {
+            if (!map) {
+                initializeMap(latLng, accuracy);
+            } else {
+                userMarker.setLatLng(latLng);
+                pathPolyline.addLatLng(latLng);
+                accuracyCircle.setLatLng(latLng);
+                accuracyCircle.setRadius(accuracy);
+                lastKnownLatLng = latLng;
+            }
+        }
+        
+        // --- Lógica de Segurança e Pânico ---
+
+        function playPanicSound() {
+            if (!panicAlertSound) {
+                // API de Áudio da Web para alerta sonoro sem arquivos externos
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                panicAlertSound = () => {
+                    if (audioContext.state === 'suspended') audioContext.resume();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.type = 'sawtooth'; // Som mais alarmante
+                    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5
+                    oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.5);
+                    
+                    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.5);
+                };
+            }
+            setInterval(panicAlertSound, 1500);
+        }
+
+        function showPanicUI() {
+            emergencyOptionsModal.style.display = 'flex';
+            playPanicSound();
+        }
+        
+        async function respondToSafetyCheck(sessionRef, status) {
+            securityCheckModal.style.display = 'none';
+            await update(ref(db, `emergencySessions/${sessionRef.key}/checkRequest`), {
+                status: status,
+                respondedAt: new Date().toISOString()
+            });
+
+            if (status === 'danger') {
+                await update(sessionRef, { status: 'panic_triggered_by_observer' });
+            }
+        }
+
+        // --- Inicialização ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session');
+
+            if (!sessionId) {
+                updateStatus("Link de acompanhamento inválido ou expirado.", 'lost');
+                mapDiv.style.display = 'none';
+                return;
+            }
+
+            recenterMapBtn.addEventListener('click', () => {
+                if (map && lastKnownLatLng) {
+                    map.setView(lastKnownLatLng, 17, { animate: true });
+                }
+            });
+
+            whatsappShareLink.href = `https://api.whatsapp.com/send?text=${encodeURIComponent(`URGENTE: Estou acompanhando uma situação de risco. Localização: ${window.location.href}`)}`;
+
+            try {
+                const firebaseConfig = JSON.parse(__firebase_config_str);
+                const app = initializeApp(firebaseConfig);
+                const db = getDatabase(app);
+                const sessionRef = ref(db, `emergencySessions/${sessionId}`);
+
+                securityCheckYesBtn.addEventListener('click', () => respondToSafetyCheck(sessionRef, 'ok'));
+                securityCheckNoBtn.addEventListener('click', () => respondToSafetyCheck(sessionRef, 'danger'));
+                closeEmergencyModalBtn.addEventListener('click', () => { emergencyOptionsModal.style.display = 'none'; });
+
+                // Listener Principal
+                onValue(sessionRef, async (snapshot) => {
+                    if (!snapshot.exists()) {
+                        updateStatus("Sessão encerrada.", 'cancelled');
+                        if(checkRequestListener) off(checkRequestListener);
+                        sessionStatus = 'ended';
+                        return;
+                    }
+
+                    const sessionData = snapshot.val();
+                    const { 
+                        liveLocation, 
+                        status, 
+                        checkRequest, 
+                        userSafetyConfirmation, 
+                        userId,
+                        anomalyDetected, 
+                        heartbeat 
+                    } = sessionData;
+
+                    // 1. Mapa
+                    if (liveLocation) {
+                        const latLng = [liveLocation.latitude, liveLocation.longitude];
+                        updateMap(latLng, liveLocation.accuracy);
+                        lastUpdateTimestamp.textContent = `Atualizado: ${formatTimestamp(liveLocation.timestamp)}`;
+                        lastUpdateTimestamp.classList.add('visible');
+
+                        if (sessionData.path) {
+                            const pathCoords = Object.values(sessionData.path).map(p => [p.latitude, p.longitude]);
+                            if(pathPolyline) pathPolyline.setLatLngs(pathCoords);
+                        }
+                    }
+
+                    // 2. Notificação "Estou bem"
+                    if (userSafetyConfirmation && userSafetyConfirmation !== lastKnownUserSafetyConfirmation) {
+                        lastKnownUserSafetyConfirmation = userSafetyConfirmation;
+                        let userName = "A usuária";
+                        try {
+                           const nameSnapshot = await get(ref(db, `users/${userId}/profile/displayName`));
+                           if(nameSnapshot.exists()) userName = nameSnapshot.val();
+                        } catch (e) {}
+                        showUserOkNotification(userName);
+                    }
+
+                    // 3. Máquina de Estados (Prioridades)
+                    
+                    // A. Pânico (Máxima Prioridade)
+                    if (status && status.includes('panic')) {
+                        if (sessionStatus !== 'panic') {
+                            const panicType = sessionData.silentMode ? " (MODO DISCRETO)" : "";
+                            updateStatus(`🚨 ALERTA DE PÂNICO${panicType} ACIONADO!`, 'panic');
+                            showPanicUI();
+                            sessionStatus = 'panic';
+                        }
+                    
+                    // B. Encerrado
+                    } else if (status === 'cancelled') {
+                        if (sessionStatus !== 'ended') {
+                            updateStatus("Acompanhamento encerrado com segurança.", 'cancelled');
+                            sessionStatus = 'ended';
+                        }
+
+                    // C. Monitoramento Ativo (Watchdog + Anomalia)
+                    } else if (status === 'active' || status === 'connection_lost') {
+                        
+                        // Cálculo do Watchdog
+                        const lastSignal = new Date(heartbeat || liveLocation?.timestamp).getTime();
+                        const timeDiff = Date.now() - lastSignal;
+
+                        if (timeDiff > STALE_CONNECTION_THRESHOLD_MS) {
+                            if (sessionStatus !== 'lost') {
+                                updateStatus("⚠️ Sinal perdido. Tentando reconectar...", 'lost');
+                                sessionStatus = 'lost';
+                            }
+                        } else {
+                            // Conexão Saudável
+                            if (sessionStatus !== 'tracking') sessionStatus = 'tracking';
+
+                            // Verifica Anomalia (Apenas se conexão estiver OK)
+                            if (anomalyDetected) {
+                                updateStatus(`⚠️ ACOMPANHANDO (Movimento Rápido Detectado!)`, 'anomaly');
+                            } else {
+                                updateStatus(`🟢 Acompanhando em Tempo Real`, 'tracking');
+                            }
+                        }
+                    }
+
+                    // 4. Solicitações de Verificação
+                    if (sessionStatus !== 'panic') {
+                        if (checkRequest && checkRequest.status === 'pending') {
+                            securityCheckModal.style.display = 'flex';
+                        } else {
+                            securityCheckModal.style.display = 'none';
+                        }
+                    } else {
+                        securityCheckModal.style.display = 'none';
+                    }
+
+                }, (error) => {
+                    console.error("Erro Firebase:", error);
+                    updateStatus("Erro de conexão.", 'cancelled');
+                });
+
+            } catch (e) {
+                console.error("Init Error:", e);
+                updateStatus("Erro crítico na inicialização.", 'cancelled');
+            }
+        });
+    </script>
+</body>
+</html>
