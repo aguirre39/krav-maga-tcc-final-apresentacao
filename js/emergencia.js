@@ -23,7 +23,7 @@ let lastLocation = null;
 // --- CONFIGURAÇÃO DE DETECÇÃO DE ANOMALIA (PARA DEMONSTRAÇÃO EM SALA) ---
 // 15 m/s (~54 km/h) é o padrão real para carros.
 // 0.8 m/s (~2.8 km/h) detecta caminhada leve (ideal para testar em sala de aula).
-const ANOMALY_THRESHOLD_MPS = 0.8; 
+const ANOMALY_THRESHOLD_MPS = 2.5; 
 
 // Constantes para o ciclo de verificação de segurança
 const USER_CHECK_VISIBILITY_DURATION_MS = 15000; 
